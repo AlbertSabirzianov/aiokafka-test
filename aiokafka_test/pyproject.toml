@@ -1,0 +1,14 @@
+[project]
+name = "aiokafka-test"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "AlbertSabirzianov", email = "albertuno@mail.ru" }
+]
+requires-python = ">=3.11"
+dependencies = ["aiokafka"]
+
+[build-system]
+requires = ["uv_build>=0.11.25,<0.12.0"]
+build-backend = "uv_build"
