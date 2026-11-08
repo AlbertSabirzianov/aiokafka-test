@@ -45,7 +45,6 @@ python -m unittest tests.test_aiokafka_test_context.TestAiokafkaTestContext.test
 
 Here are some features we plan to implement in the future:
 
-- **Consumer stub** — a mock `AIOKafkaConsumer` to test Kafka consumers without a running broker
 - **Message assertions** — helper methods for common test assertions (e.g., `assert_topic_has_messages`, `assert_message_value`)
 - **CI integration** — automated testing on pull requests
 - **Type hints** — full type coverage across the library

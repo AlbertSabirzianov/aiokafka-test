@@ -287,6 +287,161 @@ class ResetTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(messages[0].value, b"second")
 ```
 
+## Consumer Testing
+
+The library also provides a mock for `AIOKafkaConsumer`, allowing you to test consumer logic without a running Kafka broker.
+
+### Adding Records for the Consumer
+
+Use `broker.add_record()` to inject `ConsumerRecord` objects into the broker:
+
+```python
+import unittest
+from aiokafka import AIOKafkaConsumer, ConsumerRecord
+from aiokafka_test import aiokafka_test_context
+
+
+class ConsumerTest(unittest.IsolatedAsyncioTestCase):
+    async def test_receive_record(self):
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="my-topic",
+                        partition=0,
+                        offset=0,
+                        timestamp=1700000000000,
+                        timestamp_type=0,
+                        value=b"hello",
+                        key=b"key-1",
+                        checksum=None,
+                        serialized_key_size=5,
+                        serialized_value_size=5,
+                        headers=[("content-type", b"json")],
+                    )
+                )
+                record = await consumer.getone()
+                self.assertEqual(record.value, b"hello")
+                self.assertEqual(record.key, b"key-1")
+                self.assertEqual(record.topic, "my-topic")
+        finally:
+            await consumer.stop()
+```
+
+### Async For Iteration
+
+Use `async for record in consumer` to iterate over records. A helper method with `asyncio.wait_for` prevents hanging when no records are available:
+
+```python
+class AsyncForTest(unittest.IsolatedAsyncioTestCase):
+    async def _consume_all(self, consumer, timeout=1.0):
+        records = []
+        async def _iterate():
+            async for record in consumer:
+                records.append(record)
+        try:
+            await asyncio.wait_for(_iterate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+        return records
+
+    async def test_async_for(self):
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                for i in range(3):
+                    await broker.add_record(
+                        ConsumerRecord(
+                            topic="events",
+                            partition=0,
+                            offset=i,
+                            timestamp=0,
+                            timestamp_type=0,
+                            value=f"event-{i}".encode(),
+                            key=None,
+                            checksum=None,
+                            serialized_key_size=0,
+                            serialized_value_size=len(f"event-{i}".encode()),
+                            headers=[],
+                        )
+                    )
+                records = await self._consume_all(consumer)
+                self.assertEqual(len(records), 3)
+                self.assertEqual(records[0].value, b"event-0")
+                self.assertEqual(records[1].value, b"event-1")
+                self.assertEqual(records[2].value, b"event-2")
+        finally:
+            await consumer.stop()
+```
+
+### Async With Consumer
+
+Use `async with consumer` for context manager usage:
+
+```python
+class AsyncWithTest(unittest.IsolatedAsyncioTestCase):
+    async def test_async_with(self):
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="my-topic",
+                        partition=0,
+                        offset=0,
+                        timestamp=0,
+                        timestamp_type=0,
+                        value=b"data",
+                        key=None,
+                        checksum=None,
+                        serialized_key_size=0,
+                        serialized_value_size=4,
+                        headers=[],
+                    )
+                )
+                async with consumer:
+                    record = await consumer.getone()
+                    self.assertEqual(record.value, b"data")
+        finally:
+            await consumer.stop()
+```
+
+### Combined: Producer + Consumer
+
+Test the full produce-and-consume cycle:
+
+```python
+class IntegrationTest(unittest.IsolatedAsyncioTestCase):
+    async def test_produce_and_consume(self):
+        producer = AIOKafkaProducer()
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                await producer.send("orders", value=b"order-123")
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="orders",
+                        partition=0,
+                        offset=0,
+                        timestamp=0,
+                        timestamp_type=0,
+                        value=b"order-123",
+                        key=None,
+                        checksum=None,
+                        serialized_key_size=0,
+                        serialized_value_size=9,
+                        headers=[],
+                    )
+                )
+                record = await consumer.getone()
+                self.assertEqual(record.value, b"order-123")
+                self.assertEqual(record.topic, "orders")
+        finally:
+            await producer.stop()
+            await consumer.stop()
+```
+
 ## Best Practices
 
 ### 1. Always use `with`, not `async with`
