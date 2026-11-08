@@ -474,19 +474,9 @@ finally:
     await producer.stop()
 ```
 
-### 3. Create the producer inside the context when possible
 
-For maximum test isolation, create the `AIOKafkaProducer` inside the context:
 
-```python
-async def test_send(self):
-    with aiokafka_test_context() as broker:
-        producer = AIOKafkaProducer()  # created inside context
-        await producer.send("topic", value=b"data")
-        await producer.stop()
-```
-
-### 4. Use `unittest.IsolatedAsyncioTestCase`
+### 3. Use `unittest.IsolatedAsyncioTestCase`
 
 The recommended test class is `unittest.IsolatedAsyncioTestCase`, which provides isolated event loops for each async test method:
 
