@@ -1,3 +1,4 @@
+import asyncio
 import unittest
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer, TopicPartition, ConsumerRecord
 
@@ -1307,6 +1308,193 @@ class TestAiokafkaTestContext(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(record.key, b"integration-key")
                 self.assertEqual(record.headers, headers)
                 self.assertEqual(record.timestamp, 1700000000000)
+        finally:
+            await producer.stop()
+            await consumer.stop()
+
+
+    # ==================== 14. async for / async with Consumer ====================
+
+    async def _consume_all(self, consumer, timeout=1.0):
+        """Consume all records from consumer with timeout to prevent hanging."""
+        records = []
+        async def _iterate():
+            async for record in consumer:
+                records.append(record)
+        try:
+            await asyncio.wait_for(_iterate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass
+        return records
+
+    async def test_async_for_single_record(self):
+        """Iterate over a single record using async for."""
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="test-topic",
+                        partition=0,
+                        offset=0,
+                        timestamp=0,
+                        timestamp_type=0,
+                        value=b"hello",
+                        key=None,
+                        checksum=None,
+                        serialized_key_size=0,
+                        serialized_value_size=5,
+                        headers=[],
+                    )
+                )
+                records = await self._consume_all(consumer)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0].value, b"hello")
+        finally:
+            await consumer.stop()
+
+    async def test_async_for_multiple_records(self):
+        """Iterate over multiple records using async for."""
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                for i in range(5):
+                    await broker.add_record(
+                        ConsumerRecord(
+                            topic="multi-topic",
+                            partition=0,
+                            offset=i,
+                            timestamp=0,
+                            timestamp_type=0,
+                            value=f"msg-{i}".encode(),
+                            key=None,
+                            checksum=None,
+                            serialized_key_size=0,
+                            serialized_value_size=len(f"msg-{i}".encode()),
+                            headers=[],
+                        )
+                    )
+                records = await self._consume_all(consumer)
+                self.assertEqual(len(records), 5)
+                for i, record in enumerate(records):
+                    self.assertEqual(record.value, f"msg-{i}".encode())
+        finally:
+            await consumer.stop()
+
+    async def test_async_for_all_record_fields(self):
+        """Verify all record fields during async for iteration."""
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                headers = [("content-type", b"json"), ("trace-id", b"abc123")]
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="full-topic",
+                        partition=2,
+                        offset=42,
+                        timestamp=1700000000000,
+                        timestamp_type=0,
+                        value=b"full-data",
+                        key=b"full-key",
+                        checksum=None,
+                        serialized_key_size=8,
+                        serialized_value_size=9,
+                        headers=headers,
+                    )
+                )
+                records = await self._consume_all(consumer)
+                record = records[0]
+                self.assertEqual(record.topic, "full-topic")
+                self.assertEqual(record.value, b"full-data")
+                self.assertEqual(record.key, b"full-key")
+                self.assertEqual(record.partition, 2)
+                self.assertEqual(record.timestamp, 1700000000000)
+                self.assertEqual(record.offset, 42)
+                self.assertEqual(record.headers, headers)
+        finally:
+            await consumer.stop()
+
+    async def test_async_with_consumer(self):
+        """Basic async with usage for Consumer."""
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="test-topic",
+                        partition=0,
+                        offset=0,
+                        timestamp=0,
+                        timestamp_type=0,
+                        value=b"data",
+                        key=None,
+                        checksum=None,
+                        serialized_key_size=0,
+                        serialized_value_size=4,
+                        headers=[],
+                    )
+                )
+                async with consumer:
+                    record = await consumer.getone()
+                    self.assertEqual(record.value, b"data")
+        finally:
+            await consumer.stop()
+
+    async def test_async_with_async_for_combined(self):
+        """Combined async with + async for pattern."""
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                for i in range(3):
+                    await broker.add_record(
+                        ConsumerRecord(
+                            topic="app-topic",
+                            partition=0,
+                            offset=i,
+                            timestamp=0,
+                            timestamp_type=0,
+                            value=f"msg-{i}".encode(),
+                            key=b"user-1",
+                            checksum=None,
+                            serialized_key_size=6,
+                            serialized_value_size=len(f"msg-{i}".encode()),
+                            headers=[],
+                        )
+                    )
+                async with consumer:
+                    records = await self._consume_all(consumer)
+                    self.assertEqual(len(records), 3)
+                    for record in records:
+                        self.assertEqual(record.key, b"user-1")
+        finally:
+            await consumer.stop()
+
+    async def test_async_for_producer_consumer_integration(self):
+        """Send via producer, consume via async for."""
+        producer = AIOKafkaProducer()
+        consumer = AIOKafkaConsumer()
+        try:
+            with aiokafka_test_context() as broker:
+                await producer.send("integration-topic", value=b"integration-data")
+                await broker.add_record(
+                    ConsumerRecord(
+                        topic="integration-topic",
+                        partition=0,
+                        offset=0,
+                        timestamp=0,
+                        timestamp_type=0,
+                        value=b"integration-data",
+                        key=None,
+                        checksum=None,
+                        serialized_key_size=0,
+                        serialized_value_size=16,
+                        headers=[],
+                    )
+                )
+                records = await self._consume_all(consumer)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0].value, b"integration-data")
+                self.assertEqual(records[0].topic, "integration-topic")
         finally:
             await producer.stop()
             await consumer.stop()

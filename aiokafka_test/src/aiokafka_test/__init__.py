@@ -56,7 +56,7 @@ async def mock_getone(self, *partitions):
     return _record
 
 
-async def mock_start():
+async def mock_start(*args, **kwargs):
     pass
 
 
